@@ -32,26 +32,26 @@ public class ZipStreamStream {
         return new Processor() {
             @Override
             public <T> Stream<T> map(Function<InputStream, T> fun) {
-                return entryStream(zipInputStream).map(entry -> fun.apply(inputStream));
+                return entries(zipInputStream).map(entry -> fun.apply(inputStream));
             }
             @Override
             public <T> Stream<T> map(BiFunction<String, InputStream, T> fun) {
-                return entryStream(zipInputStream).map(entry -> fun.apply(entry.getName(), inputStream));
+                return entries(zipInputStream).map(entry -> fun.apply(entry.getName(), inputStream));
             }
 
             @Override
             public <T> Stream<T> flatMap(Function<InputStream, Stream<T>> fun) {
-                return entryStream(zipInputStream).flatMap(entry -> fun.apply(inputStream));
+                return entries(zipInputStream).flatMap(entry -> fun.apply(inputStream));
             }
 
             @Override
             public <T> Stream<T> flatMapEntries(BiFunction<ZipEntry, InputStream, Stream<T>> fun) {
-                return entryStream(zipInputStream).flatMap(entry -> fun.apply(entry, inputStream));
+                return entries(zipInputStream).flatMap(entry -> fun.apply(entry, inputStream));
             }
 
             @Override
             public <T> Stream<T> flatMap(BiFunction<String, InputStream, Stream<T>> fun) {
-                return entryStream(zipInputStream).flatMap(entry -> fun.apply(entry.getName(), inputStream));
+                return entries(zipInputStream).flatMap(entry -> fun.apply(entry.getName(), inputStream));
             }
         };
     }
@@ -73,7 +73,7 @@ public class ZipStreamStream {
         return new UncloseableInputStream(zis);
     }
 
-    private static Stream<ZipEntry> entryStream(ZipInputStream zis) {
+    private static Stream<ZipEntry> entries(ZipInputStream zis) {
         return StreamSupport.stream(new ZipEntrySpliterator(zis), false);
     }
 
