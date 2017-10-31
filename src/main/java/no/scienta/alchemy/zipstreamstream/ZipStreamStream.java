@@ -1,206 +1,125 @@
 package no.scienta.alchemy.zipstreamstream;
 
-import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.Charset;
-import java.nio.charset.StandardCharsets;
-import java.util.Objects;
-import java.util.Optional;
-import java.util.Spliterator;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Stream;
-import java.util.stream.StreamSupport;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
-@SuppressWarnings("ALL")
-public class ZipStreamStream {
+import static java.util.Objects.requireNonNull;
 
-    public static <T> Processor stream(InputStream inputStream) {
-        return stream(inputStream, null);
+/**
+ * A functional way to process zip files.  By using the streaming paradigm, we avoid loading the whole thing into
+ * memory.  As the resulting stream is processed, data gets pulled from the zip file on-demand.
+ * <p/>
+ * The {@link ZipStreamStream} takes responsibility for closing the zip stream. This needs to happen when
+ * the stream is exhausted.  Since we read from the zip stream on-demand as the stream is processed, this is at
+ * some undefined point in the future.  In other words, closing it just after creating the {@link ZipStreamStream}
+ * is too early.
+ */
+@SuppressWarnings("unused")
+public interface ZipStreamStream {
+
+    /**
+     * Whenever you want zips<br>
+     * All you have to do is stream<br>
+     * ZipStreamStream.stream<br>
+     *
+     * @param inputStream An input stream which can be unzipped. If this value is a {@link ZipInputStream} already,
+     *                    it will be used as-is
+     * @return Stream which handles closing of the inputstream was passed as an argument
+     */
+    static ZipStreamStream stream(InputStream inputStream) {
+        return stream(requireNonNull(inputStream, "inputStream"), null);
     }
 
-    public static <T> Processor stream(InputStream zis, Charset charset) {
-        return stream(new ZipInputStream(zis, charset == null ? StandardCharsets.UTF_8 : charset));
+    /**
+     * Whenever you want zips<br>
+     * All you have to do is stream<br>
+     * ZipStreamStream.stream<br>
+     *
+     * @param inputStream An input stream which can be unzipped.  If this value is a {@link ZipInputStream} already,
+     *                    it will be used as-is, ignoring the charset argument.
+     * @param charset     Charset for reading the inputstream as a zip stream
+     * @return Stream which handles closing of the inputstream that was passed as an argument
+     */
+    static ZipStreamStream stream(InputStream inputStream, Charset charset) {
+        boolean alreadyZipped = requireNonNull(inputStream, "inputStream") instanceof ZipStreamStream;
+        return stream(alreadyZipped ? (ZipInputStream) inputStream
+                : charset == null ? new ZipInputStream(inputStream)
+                : new ZipInputStream(inputStream, charset));
     }
 
-    public static Processor stream(ZipInputStream zipInputStream) {
-        UncloseableInputStream inputStream = seal(Objects.requireNonNull(zipInputStream, "zip input stream"));
-        return new Processor() {
-            @Override
-            public <T> Stream<T> map(Function<InputStream, T> fun) {
-                return entries(zipInputStream).map(entry -> fun.apply(inputStream));
-            }
-            @Override
-            public <T> Stream<T> map(BiFunction<String, InputStream, T> fun) {
-                return entries(zipInputStream).map(entry -> fun.apply(entry.getName(), inputStream));
-            }
-
-            @Override
-            public <T> Stream<T> flatMap(Function<InputStream, Stream<T>> fun) {
-                return entries(zipInputStream).flatMap(entry -> fun.apply(inputStream));
-            }
-
-            @Override
-            public <T> Stream<T> flatMapEntries(BiFunction<ZipEntry, InputStream, Stream<T>> fun) {
-                return entries(zipInputStream).flatMap(entry -> fun.apply(entry, inputStream));
-            }
-
-            @Override
-            public <T> Stream<T> flatMap(BiFunction<String, InputStream, Stream<T>> fun) {
-                return entries(zipInputStream).flatMap(entry -> fun.apply(entry.getName(), inputStream));
-            }
-        };
+    /**
+     * Whenever you want zips<br>
+     * All you have to do is stream<br>
+     * ZipStreamStream.stream<br>
+     *
+     * @param zipInputStream A ready-to-go zip input stream
+     * @return Stream which handles closing of the zip inputstream that was passed as an argument
+     */
+    static ZipStreamStream stream(ZipInputStream zipInputStream) {
+        return new ZipStreamStreamImpl(requireNonNull(zipInputStream, "zipInputStream"));
     }
 
-    interface Processor  {
+    /**
+     * @param fun Mapping function
+     * @param <T> Target type
+     * @return A stream of target type instances, one per zip entry
+     */
+    <T> Stream<T> map(Function<InputStream, T> fun);
 
-        <T> Stream<T> map(Function<InputStream, T> fun);
+    /**
+     * @param fun Mapping function
+     * @param <T> Target type
+     * @return A stream of target type instances, one per named zip entry
+     */
+    <T> Stream<T> map(BiFunction<String, InputStream, T> fun);
 
-        <T> Stream<T> map(BiFunction<String, InputStream, T> fun);
+    /**
+     * @param fun Mapping function
+     * @param <T> Target type
+     * @return A stream of target type instances, one per zip entry
+     */
+    <T> Stream<T> mapEntries(BiFunction<ZipEntry, InputStream, T> fun);
 
-        <T> Stream<T> flatMap(Function<InputStream, Stream<T>> fun);
+    /**
+     * @param fun Mapping function
+     * @param <T> Target type
+     * @return A flattened stream of target type instances, produced from zip entries
+     */
+    <T> Stream<T> flatMap(Function<InputStream, Stream<T>> fun);
 
-        <T> Stream<T> flatMap(BiFunction<String, InputStream, Stream<T>> fun);
+    /**
+     * @param fun Mapping function
+     * @param <T> Target type
+     * @return A flattened stream of target type instances, produced from named zip entries
+     */
+    <T> Stream<T> flatMap(BiFunction<String, InputStream, Stream<T>> fun);
 
-        <T> Stream<T> flatMapEntries(BiFunction<ZipEntry, InputStream, Stream<T>> fun);
-    }
+    /**
+     * @param fun Mapping function
+     * @param <T> Target type
+     * @return A flattened stream of target type instances, produced from zip entries
+     */
+    <T> Stream<T> flatMapEntries(BiFunction<ZipEntry, InputStream, Stream<T>> fun);
 
-    private static UncloseableInputStream seal(ZipInputStream zis) {
-        return new UncloseableInputStream(zis);
-    }
+    /**
+     * @param action Action to run on each zip entry
+     */
+    void forEach(Consumer<InputStream> action);
 
-    private static Stream<ZipEntry> entries(ZipInputStream zis) {
-        return StreamSupport.stream(new ZipEntrySpliterator(zis), false);
-    }
+    /**
+     * @param action Action to run on each named zip entry
+     */
+    void forEach(BiConsumer<String, InputStream> action);
 
-    private static class ZipEntrySpliterator implements Spliterator<ZipEntry> {
-
-        private final AtomicReference<ZipEntry> current;
-
-        private final ZipInputStream zis;
-
-        ZipEntrySpliterator(ZipInputStream zis) {
-            this.zis = zis;
-            current = new AtomicReference<>();
-        }
-
-        @Override
-        public boolean tryAdvance(Consumer<? super ZipEntry> action) {
-            closePreviousEntry();
-            ZipEntry nextEntry = nextEntry();
-            return nextEntry == null
-                    ? finishStream()
-                    : processNext(action, nextEntry);
-        }
-
-        @Override
-        public Spliterator<ZipEntry> trySplit() {
-            return null;
-        }
-
-        @Override
-        public long estimateSize() {
-            return Long.MAX_VALUE;
-        }
-
-        @Override
-        public int characteristics() {
-            return Spliterator.NONNULL & Spliterator.IMMUTABLE;
-        }
-
-        private boolean processNext(Consumer<? super ZipEntry> action, ZipEntry nextEntry) {
-            try {
-                action.accept(nextEntry);
-            } finally {
-                current.set(nextEntry);
-            }
-            return true;
-        }
-
-        private boolean finishStream() {
-            try {
-                zis.close();
-            } catch (IOException e) {
-                throw new IllegalStateException(e);
-            }
-            return false;
-        }
-
-        private void closePreviousEntry() {
-            Optional.ofNullable(current.get()).ifPresent(entry -> {
-                try {
-                    zis.closeEntry();
-                } catch (IOException e) {
-                    throw new IllegalStateException(e);
-                }
-            });
-        }
-
-        private ZipEntry nextEntry() {
-            ZipEntry nextEntry;
-            try {
-                nextEntry = zis.getNextEntry();
-            } catch (IOException e) {
-                throw new IllegalStateException(e);
-            }
-            return nextEntry;
-        }
-    }
-
-    private static final class UncloseableInputStream extends InputStream {
-
-        private final InputStream inputStream;
-
-        UncloseableInputStream(InputStream inputStream) {
-            this.inputStream = inputStream;
-        }
-
-        @Override
-        public void close() throws IOException {
-        }
-
-        @Override
-        public int read(byte[] b) throws IOException {
-            return inputStream.read(b);
-        }
-
-        @Override
-        public int read(byte[] b, int off, int len) throws IOException {
-            return inputStream.read(b, off, len);
-        }
-
-        @Override
-        public long skip(long n) throws IOException {
-            return inputStream.skip(n);
-        }
-
-        @Override
-        public int available() throws IOException {
-            return inputStream.available();
-        }
-
-        @Override
-        public synchronized void mark(int readlimit) {
-            inputStream.mark(readlimit);
-        }
-
-        @Override
-        public synchronized void reset() throws IOException {
-            inputStream.reset();
-        }
-
-        @Override
-        public boolean markSupported() {
-            return inputStream.markSupported();
-        }
-
-        @Override
-        public int read() throws IOException {
-            return inputStream.read();
-        }
-    }
+    /**
+     * @param action Action to run on each zip entry
+     */
+    void forEachEntry(BiConsumer<ZipEntry, InputStream> action);
 }
